@@ -27,7 +27,7 @@ fn MatrixProduct(comptime A: type, comptime B: type) type {
     return [rows(A)][cols(B)]elem(A);
 }
 
-fn matrix_multiply_1(a: anytype, b: anytype, c: *MatrixProduct(@TypeOf(a.*), @TypeOf(b.*))) void {
+fn matrix_multiply(a: anytype, b: anytype, c: *MatrixProduct(@TypeOf(a.*), @TypeOf(b.*))) void {
     for (c) |*it| {
         for (it) |*jt| {
             jt.* = 0;
@@ -35,147 +35,22 @@ fn matrix_multiply_1(a: anytype, b: anytype, c: *MatrixProduct(@TypeOf(a.*), @Ty
     }
 
     for (0..c.len) |row| {
-        for (0..c[row].len) |col| {
-            for (0..b.len) |idx| {
+        for (0..b.len) |idx| {
+            const vec_len = 8;
+            const Vector = @Vector(vec_len, elem(@TypeOf(c.*)));
+
+            const a_vec = @as(Vector, @splat(a[row][idx]));
+
+            var col = @as(usize, 0);
+
+            while (col + vec_len <= c[row].len) : (col += vec_len) {
+                const b_vec = @as(Vector, b[idx][col..][0..vec_len].*);
+                c[row][col..][0..vec_len].* += a_vec * b_vec;
+            }
+
+            while (col < c[row].len) : (col += 1) {
                 c[row][col] += a[row][idx] * b[idx][col];
             }
-        }
-    }
-}
-
-// CITE https://en.wikipedia.org/wiki/Matrix_multiplication_algorithm#Non-square_matrices
-fn matrix_multiply_2_util(a: anytype, b: anytype, c: *MatrixProduct(@TypeOf(a.*), @TypeOf(b.*)), a_row_beg: usize, a_row_end: usize, a_col_beg: usize, a_col_end: usize, b_row_beg: usize, b_row_end: usize, b_col_beg: usize, b_col_end: usize, c_row_beg: usize, c_row_end: usize, c_col_beg: usize, c_col_end: usize) void {
-    const n = a_row_end - a_row_beg;
-    const p = b_col_end - b_col_beg;
-
-    std.debug.assert(a_col_end - a_col_beg == b_row_end - b_row_beg);
-    std.debug.assert(n == c_row_end - c_row_beg and p == c_col_end - c_col_beg);
-
-    const m = a_col_end - a_col_beg;
-
-    const a_row_mid = (a_row_beg + a_row_end) / 2;
-    const a_col_mid = (a_col_beg + a_col_end) / 2;
-    const b_row_mid = (b_row_beg + b_row_end) / 2;
-    const b_col_mid = (b_col_beg + b_col_end) / 2;
-    const c_row_mid = (c_row_beg + c_row_end) / 2;
-    const c_col_mid = (c_col_beg + c_col_end) / 2;
-
-    const max_dim = @max(@max(n, m), p);
-
-    if (max_dim <= 16) {
-        // The order of fors has been optimized :D
-        for (a_col_beg..a_col_end, b_row_beg..b_row_end) |a_col, b_row| {
-            for (a_row_beg..a_row_end, c_row_beg..c_row_end) |a_row, c_row| {
-                for (b_col_beg..b_col_end, c_col_beg..c_col_end) |b_col, c_col| {
-                    c[c_row][c_col] += a[a_row][a_col] * b[b_row][b_col];
-                }
-            }
-        }
-    } else if (n == max_dim) {
-        matrix_multiply_2_util(a, b, c, a_row_beg, a_row_mid, a_col_beg, a_col_end, b_row_beg, b_row_end, b_col_beg, b_col_end, c_row_beg, c_row_mid, c_col_beg, c_col_end);
-        matrix_multiply_2_util(a, b, c, a_row_mid, a_row_end, a_col_beg, a_col_end, b_row_beg, b_row_end, b_col_beg, b_col_end, c_row_mid, c_row_end, c_col_beg, c_col_end);
-    } else if (p == max_dim) {
-        matrix_multiply_2_util(a, b, c, a_row_beg, a_row_end, a_col_beg, a_col_end, b_row_beg, b_row_end, b_col_beg, b_col_mid, c_row_beg, c_row_end, c_col_beg, c_col_mid);
-        matrix_multiply_2_util(a, b, c, a_row_beg, a_row_end, a_col_beg, a_col_end, b_row_beg, b_row_end, b_col_mid, b_col_end, c_row_beg, c_row_end, c_col_mid, c_col_end);
-    } else {
-        matrix_multiply_2_util(a, b, c, a_row_beg, a_row_end, a_col_beg, a_col_mid, b_row_beg, b_row_mid, b_col_beg, b_col_end, c_row_beg, c_row_end, c_col_beg, c_col_end);
-        matrix_multiply_2_util(a, b, c, a_row_beg, a_row_end, a_col_mid, a_col_end, b_row_mid, b_row_end, b_col_beg, b_col_end, c_row_beg, c_row_end, c_col_beg, c_col_end);
-    }
-}
-
-fn matrix_multiply_2(a: anytype, b: anytype, c: *MatrixProduct(@TypeOf(a.*), @TypeOf(b.*))) void {
-    for (c) |*it| {
-        for (it) |*jt| {
-            jt.* = 0;
-        }
-    }
-
-    const rows_a = rows(@TypeOf(a.*));
-    const cols_a = cols(@TypeOf(a.*));
-    const rows_b = rows(@TypeOf(b.*));
-    const cols_b = cols(@TypeOf(b.*));
-    const rows_c = rows(@TypeOf(c.*));
-    const cols_c = cols(@TypeOf(c.*));
-
-    matrix_multiply_2_util(a, b, c, 0, rows_a, 0, cols_a, 0, rows_b, 0, cols_b, 0, rows_c, 0, cols_c);
-}
-
-fn matrix_multiply_3(a: anytype, b: anytype, c: *MatrixProduct(@TypeOf(a.*), @TypeOf(b.*))) void {
-    const b_t: *[cols(@TypeOf(b.*))][rows(@TypeOf(b.*))]elem(@TypeOf(b.*)) = @ptrCast(b);
-
-    for (0..b.len) |row| {
-        for (row..b[row].len) |col| {
-            // XXX maybe use swap here? It seems less readable THOUGH
-            const tmp = b[row][col];
-            b[row][col] = b_t[col][row];
-            b_t[col][row] = tmp;
-        }
-    }
-
-    for (c, a) |*c_row, a_row| {
-        for (c_row, b_t) |*c_cell, b_col| {
-            c_cell.* = 0;
-            for (a_row, b_col) |a_cell, b_cell| c_cell.* += a_cell * b_cell;
-        }
-    }
-
-    for (0..b.len) |row| {
-        for (row..b[row].len) |col| {
-            // XXX maybe use swap here? It seems less readable THOUGH
-            const tmp = b[row][col];
-            b[row][col] = b_t[col][row];
-            b_t[col][row] = tmp;
-        }
-    }
-}
-
-const matrix_multiply = matrix_multiply_2;
-
-test matrix_multiply {
-    var default_prng = std.rand.DefaultPrng.init(1);
-    const random = default_prng.random();
-
-    var a = try std.testing.allocator.create([1000][1000]f32);
-    var b = try std.testing.allocator.create([1000][1000]f32);
-
-    for (a) |*a_row| {
-        for (a_row) |*a_cell| {
-            a_cell.* = random.floatNorm(@TypeOf(a_cell.*));
-        }
-    }
-
-    for (b) |*b_row| {
-        for (b_row) |*b_cell| {
-            b_cell.* = random.floatNorm(@TypeOf(b_cell.*));
-        }
-    }
-
-    var c_1 = try std.testing.allocator.create([1000][1000]f32);
-    var c_2 = try std.testing.allocator.create([1000][1000]f32);
-    var c_3 = try std.testing.allocator.create([1000][1000]f32);
-
-    var timer = try std.time.Timer.start();
-
-    std.debug.print("\n", .{});
-
-    matrix_multiply_1(a, b, c_1);
-    std.debug.print("{:0>12}ns 1\n", .{timer.lap()});
-
-    matrix_multiply_2(a, b, c_2);
-    std.debug.print("{:0>12}ns 2\n", .{timer.lap()});
-
-    for (c_1, c_2) |row_1, row_2| {
-        for (row_1, row_2) |cell_1, cell_2| {
-            try std.testing.expectApproxEqAbs(cell_1, cell_2, 1e-6);
-        }
-    }
-
-    matrix_multiply_3(a, b, c_3);
-    std.debug.print("{:0>12}ns 3\n", .{timer.lap()});
-
-    for (c_1, c_3) |row_1, row_3| {
-        for (row_1, row_3) |cell_1, cell_3| {
-            try std.testing.expectApproxEqAbs(cell_1, cell_3, 1e-6);
         }
     }
 }
@@ -617,7 +492,9 @@ pub fn main() !void {
         const eval_err = iteration % 10 == 0;
         var err: fnn = 0;
 
-        for (0..64) |_| {
+        var timer = try std.time.Timer.start();
+
+        for (0..1) |_| {
             const idx = random.intRangeLessThan(usize, 0, inputs.len);
             const input = inputs[idx];
             const truth = truths[idx];
@@ -638,9 +515,9 @@ pub fn main() !void {
             if (eval_err) err += Error.eval(output, &truth);
 
             _ = hot_arena.reset(.retain_capacity);
-
-            std.debug.print("A\n", .{});
         }
+
+        std.debug.print("{}ms\n", .{timer.lap() / std.time.ns_per_ms});
 
         for (gradient) |*it| it.* /= @floatFromInt(inputs.len);
 
